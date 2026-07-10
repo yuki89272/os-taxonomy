@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>數學科知識地圖 · Marble Taxonomy</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --board:#16302a;
+    --board-edge:#0f221d;
+    --chalk-white:#f4f1e8;
+    --chalk-yellow:#e8d97a;
+    --chalk-pink:#e0a3a8;
+    --chalk-blue:#8fc4d6;
+    --chalk-green:#a8cf9e;
+    --chalk-orange:#e0a973;
+    --chalk-purple:#b7a3d6;
+    --chalk-teal:#7fcbb8;
+    --dust:#9fb8ae;
+    --panel-bg:#0f221dcc;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:var(--board);
+    overflow:hidden;
+    font-family:'Space Mono', monospace;
+    color:var(--chalk-white);
+  }
+  body{
+    background-image:
+      radial-gradient(circle at 15% 20%, rgba(255,255,255,0.02) 0%, transparent 40%),
+      radial-gradient(circle at 85% 80%, rgba(255,255,255,0.02) 0%, transparent 40%);
+  }
+  #stage{ width:100vw; height:100vh; display:block; cursor:grab; }
+  #stage:active{ cursor:grabbing; }
+
+  .hand{ font-family:'Kalam', cursive; }
+
+  #header{
+    position:fixed; top:0; left:0; right:0;
+    padding:18px 24px 12px;
+    pointer-events:none;
+    z-index:10;
+    background:linear-gradient(180deg, var(--board-edge)ee 0%, transparent 100%);
+  }
+  #header h1{
+    font-family:'Kalam', cursive;
+    font-weight:700;
+    font-size:22px;
+    margin:0 0 2px 0;
+    color:var(--chalk-white);
+    text-shadow:0 0 8px rgba(244,241,232,0.15);
+  }
+  #header p{
+    margin:0;
+    font-size:11px;
+    color:var(--dust);
+    letter-spacing:0.02em;
+  }
+
+  #legend{
+    position:fixed; bottom:16px; left:16px;
+    background:var(--panel-bg);
+    border:1px solid #ffffff22;
+    border-radius:8px;
+    padding:10px 14px;
+    font-size:10.5px;
+    z-index:10;
+    max-width:220px;
+    backdrop-filter:blur(3px);
+  }
+  #legend .row{ display:flex; align-items:center; gap:7px; margin:3px 0; cursor:pointer; opacity:0.55; transition:opacity .15s; }
+  #legend .row.active{ opacity:1; }
+  #legend .row:hover{ opacity:1; }
+  #legend .dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  #legend .title{ font-family:'Kalam',cursive; font-size:12px; margin-bottom:6px; color:var(--chalk-yellow); }
+
+  #panel{
+    position:fixed; top:0; right:0; bottom:0;
+    width:340px;
+    background:var(--panel-bg);
+    border-left:1px solid #ffffff22;
+    padding:70px 22px 22px;
+    overflow-y:auto;
+    transform:translateX(100%);
+    transition:transform .28s ease;
+    z-index:20;
+    backdrop-filter:blur(4px);
+  }
+  #panel.open{ transform:translateX(0); }
+  #panel .close{
+    position:absolute; top:20px; right:20px;
+    cursor:pointer; font-size:20px; color:var(--dust);
+    line-height:1; padding:4px;
+  }
+  #panel .close:hover{ color:var(--chalk-white); }
+  #panel .domain-tag{
+    display:inline-block; font-size:10px; padding:2px 8px;
+    border-radius:20px; border:1px solid currentColor;
+    margin-bottom:10px;
+  }
+  #panel h2{
+    font-family:'Kalam',cursive;
+    font-size:21px; margin:0 0 4px 0; color:var(--chalk-white);
+    line-height:1.3;
+  }
+  #panel .meta{ font-size:10.5px; color:var(--dust); margin-bottom:14px; }
+  #panel .desc{ font-size:12.5px; line-height:1.7; color:#ddd6c8; margin-bottom:16px; }
+  #panel h3{
+    font-family:'Kalam',cursive; font-size:14px; color:var(--chalk-yellow);
+    margin:18px 0 8px 0; border-bottom:1px dashed #ffffff33; padding-bottom:4px;
+  }
+  #panel ul{ margin:0; padding-left:18px; font-size:11.5px; line-height:1.9; color:#ddd6c8; }
+  #panel .prereq-item{
+    font-size:11.5px; padding:7px 9px; margin-bottom:5px;
+    background:#ffffff0a; border-radius:5px; border-left:2px solid var(--chalk-blue);
+    cursor:pointer;
+  }
+  #panel .prereq-item:hover{ background:#ffffff14; }
+  #panel .prereq-item .reason{ font-size:10px; color:var(--dust); margin-top:3px; font-style:italic; }
+  #panel .empty-note{ font-size:11px; color:var(--dust); font-style:italic; }
+
+  #search{
+    position:fixed; top:20px; right:24px; z-index:15;
+    background:var(--panel-bg); border:1px solid #ffffff22; border-radius:20px;
+    padding:7px 14px; font-size:12px; color:var(--chalk-white);
+    width:200px; font-family:'Space Mono',monospace;
+  }
+  #search::placeholder{ color:var(--dust); }
+  #search:focus{ outline:none; border-color:var(--chalk-yellow); }
+
+  #hint{
+    position:fixed; bottom:16px; right:16px; z-index:10;
+    font-size:10.5px; color:var(--dust); text-align:right;
+    max-width:220px; line-height:1.6;
+  }
+
+  .node-label{
+    font-family:'Space Mono', monospace;
+    font-size:9px;
+    fill:var(--dust);
+    pointer-events:none;
+    user-select:none;
+  }
+  .link-line{ stroke:var(--dust); stroke-opacity:0.18; }
+  .link-line.highlight{ stroke:var(--chalk-yellow); stroke-opacity:0.9; stroke-width:1.6; }
+  .node-dot{ cursor:pointer; stroke:var(--board); stroke-width:1.2; }
+  .node-dot.dim{ opacity:0.12; }
+  .node-dot.hi{ stroke:var(--chalk-white); stroke-width:2; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1 class="hand">數學科知識地圖 · Prerequisite Graph</h1>
+  <p>Marble os-taxonomy · Mathematics · 503 micro-topics · 985 條先備關係 — 點節點看詳情與先備鏈</p>
+</div>
+
+<input id="search" type="text" placeholder="搜尋知識點名稱...">
+
+<svg id="stage"></svg>
+
+<div id="legend">
+  <div class="title">領域 Domain</div>
+  <div id="legend-rows"></div>
+</div>
+
+<div id="hint">拖曳空白處可平移畫布<br>滾輪縮放 · 點節點展開詳情</div>
+
+<div id="panel">
+  <div class="close" onclick="closePanel()">✕</div>
+  <div id="panel-content"></div>
+</div>
+
+<script src="./data-embed.js"></script>
+<script>
+const raw = window.__TAXONOMY_DATA__;
+const nodes = raw.topics.map(d => ({...d}));
+const links = raw.links.map(d => ({...d}));
+
+const nodeById = new Map(nodes.map(n => [n.id, n]));
+const inbound = new Map();  // prereqs for a node
+const outbound = new Map(); // things that depend on this node
+links.forEach(l => {
+  if(!inbound.has(l.target)) inbound.set(l.target, []);
+  inbound.get(l.target).push(l);
+  if(!outbound.has(l.source)) outbound.set(l.source, []);
+  outbound.get(l.source).push(l);
+});
+
+const domains = [...new Set(nodes.map(n => n.domain))].sort();
+const chalkColors = ['#f4f1e8','#e8d97a','#e0a3a8','#8fc4d6','#a8cf9e','#e0a973','#b7a3d6','#7fcbb8','#c9a678','#9fd6e8','#e8b8d6','#c4d68f'];
+const colorScale = d3.scaleOrdinal().domain(domains).range(chalkColors);
+
+const activeDomains = new Set(domains);
+
+// legend
+const legendRows = d3.select('#legend-rows');
+domains.forEach(dom => {
+  const row = legendRows.append('div').attr('class','row active').attr('data-domain', dom)
+    .on('click', () => toggleDomain(dom));
+  row.append('div').attr('class','dot').style('background', colorScale(dom));
+  row.append('div').text(dom);
+});
+function toggleDomain(dom){
+  if(activeDomains.has(dom)) activeDomains.delete(dom); else activeDomains.add(dom);
+  d3.select(`.row[data-domain="${dom}"]`).classed('active', activeDomains.has(dom));
+  render();
+}
+
+const width = window.innerWidth, height = window.innerHeight;
+const svg = d3.select('#stage').attr('viewBox', [0,0,width,height]);
+const g = svg.append('g');
+
+svg.call(d3.zoom().scaleExtent([0.15, 6]).on('zoom', (ev) => g.attr('transform', ev.transform)));
+
+const linkSel = g.append('g').attr('class','links');
+const nodeSel = g.append('g').attr('class','nodes');
+const labelSel = g.append('g').attr('class','labels');
+
+const radiusScale = d3.scaleSqrt().domain(d3.extent(nodes, d => d.centrality || 0.01)).range([3, 13]);
+
+const simulation = d3.forceSimulation(nodes)
+  .force('link', d3.forceLink(links).id(d => d.id).distance(38).strength(0.35))
+  .force('charge', d3.forceManyBody().strength(-42))
+  .force('center', d3.forceCenter(width/2, height/2))
+  .force('collide', d3.forceCollide().radius(d => radiusScale(d.centrality||0.01) + 3))
+  .force('x', d3.forceX(width/2).strength(0.02))
+  .force('y', d3.forceY(d => 60 + (d.ageStart||6) * 55).strength(0.15));
+
+let selectedId = null;
+
+function render(){
+  const visibleNodes = nodes.filter(n => activeDomains.has(n.domain));
+  const visibleIds = new Set(visibleNodes.map(n=>n.id));
+  const visibleLinks = links.filter(l => visibleIds.has(l.source.id||l.source) && visibleIds.has(l.target.id||l.target));
+
+  const link = linkSel.selectAll('line').data(visibleLinks, d => (d.source.id||d.source)+'-'+(d.target.id||d.target));
+  link.exit().remove();
+  link.enter().append('line').attr('class','link-line').merge(link);
+
+  const node = nodeSel.selectAll('circle').data(visibleNodes, d => d.id);
+  node.exit().remove();
+  const nodeEnter = node.enter().append('circle')
+    .attr('class','node-dot')
+    .attr('r', d => radiusScale(d.centrality||0.01))
+    .attr('fill', d => colorScale(d.domain))
+    .on('click', (ev,d) => selectNode(d.id))
+    .call(drag(simulation));
+  nodeEnter.append('title').text(d => d.name);
+  nodeEnter.merge(node);
+
+  const label = labelSel.selectAll('text').data(visibleNodes.filter(d=>radiusScale(d.centrality||0.01) > 7), d => d.id);
+  label.exit().remove();
+  label.enter().append('text').attr('class','node-label').text(d=>d.name).merge(label);
+
+  simulation.nodes(visibleNodes);
+  simulation.force('link').links(visibleLinks);
+  simulation.alpha(0.6).restart();
+}
+
+simulation.on('tick', () => {
+  linkSel.selectAll('line')
+    .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+    .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+  nodeSel.selectAll('circle')
+    .attr('cx', d => d.x).attr('cy', d => d.y);
+  labelSel.selectAll('text')
+    .attr('x', d => d.x + 10).attr('y', d => d.y + 3);
+});
+
+function drag(sim){
+  function started(ev,d){ if(!ev.active) sim.alphaTarget(0.25).restart(); d.fx=d.x; d.fy=d.y; }
+  function dragged(ev,d){ d.fx=ev.x; d.fy=ev.y; }
+  function ended(ev,d){ if(!ev.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }
+  return d3.drag().on('start',started).on('drag',dragged).on('end',ended);
+}
+
+function selectNode(id){
+  selectedId = id;
+  const node = nodeById.get(id);
+  const prereqs = (inbound.get(id) || []).map(l => ({...l, node: nodeById.get(l.source.id||l.source)}));
+  const dependents = (outbound.get(id) || []).map(l => ({...l, node: nodeById.get(l.target.id||l.target)}));
+
+  d3.select('#panel-content').html(`
+    <div class="domain-tag hand" style="color:${colorScale(node.domain)}">${node.domain}</div>
+    <h2 class="hand">${node.name}</h2>
+    <div class="meta">${node.type} · 年齡 ${node.ageStart}–${node.ageEnd} 歲 · centrality ${(node.centrality*100).toFixed(1)}</div>
+    <div class="desc">${node.description || ''}</div>
+    ${node.evidence && node.evidence.length ? `
+      <h3>掌握指標 Evidence</h3>
+      <ul>${node.evidence.map(e=>`<li>${e}</li>`).join('')}</ul>
+    ` : ''}
+    <h3>先備知識 Prerequisites (${prereqs.length})</h3>
+    ${prereqs.length ? prereqs.map(p => `
+      <div class="prereq-item" data-id="${p.node.id}">
+        <b>${p.node.name}</b> <span style="color:var(--dust); font-size:10px;">[${p.strength}]</span>
+        <div class="reason">${p.reason}</div>
+      </div>`).join('') : '<div class="empty-note">沒有先備知識，這是起點概念</div>'}
+    <h3>後續延伸 Leads to (${dependents.length})</h3>
+    ${dependents.length ? dependents.map(p => `
+      <div class="prereq-item" data-id="${p.node.id}" style="border-left-color:var(--chalk-green)">
+        <b>${p.node.name}</b>
+        <div class="reason">${p.reason}</div>
+      </div>`).join('') : '<div class="empty-note">沒有後續延伸，這是終端概念</div>'}
+  `);
+
+  d3.selectAll('.prereq-item').on('click', function(){ selectNode(this.getAttribute('data-id')); });
+
+  d3.select('#panel').classed('open', true);
+  highlightChain(id);
+}
+
+function closePanel(){
+  d3.select('#panel').classed('open', false);
+  selectedId = null;
+  highlightChain(null);
+}
+
+function highlightChain(id){
+  if(!id){
+    nodeSel.selectAll('circle').classed('dim', false).classed('hi', false);
+    linkSel.selectAll('line').classed('highlight', false);
+    return;
+  }
+  const related = new Set([id]);
+  (inbound.get(id)||[]).forEach(l => related.add(l.source.id||l.source));
+  (outbound.get(id)||[]).forEach(l => related.add(l.target.id||l.target));
+
+  nodeSel.selectAll('circle')
+    .classed('dim', d => !related.has(d.id))
+    .classed('hi', d => d.id === id);
+  linkSel.selectAll('line')
+    .classed('highlight', d => {
+      const s = d.source.id||d.source, t = d.target.id||d.target;
+      return (s===id || t===id);
+    });
+}
+
+d3.select('#search').on('input', function(){
+  const q = this.value.trim().toLowerCase();
+  if(!q){ nodeSel.selectAll('circle').classed('dim', false); return; }
+  nodeSel.selectAll('circle').classed('dim', d => !d.name.toLowerCase().includes(q));
+});
+
+render();
+</script>
+</body>
+</html>
