@@ -183,6 +183,25 @@
   .conf-high{ background:#a8cf9e33; color:#a8cf9e; }
   .conf-mid{ background:#e8d97a33; color:#e8d97a; }
   .conf-low{ background:#e0a3a833; color:#e0a3a8; }
+
+  #cross-panel{
+    position:fixed; bottom:16px; left:254px;
+    background:var(--panel-bg); border:1px solid #ffffff22; border-radius:8px;
+    padding:10px 14px; font-size:10.5px; z-index:10; max-width:230px;
+    backdrop-filter:blur(3px);
+  }
+  #cross-panel .title{ font-family:'Kalam',cursive; font-size:12px; color:var(--chalk-yellow); margin-bottom:6px; }
+  #cross-panel input[type="checkbox"]{ accent-color: var(--chalk-yellow); }
+  #cross-subject-rows{ margin-top:6px; display:none; }
+  #cross-subject-rows.open{ display:block; }
+  #cross-subject-rows .row{ display:flex; align-items:center; gap:7px; margin:3px 0; cursor:pointer; opacity:0.55; transition:opacity .15s; }
+  #cross-subject-rows .row.active{ opacity:1; }
+  #cross-subject-rows .row:hover{ opacity:1; }
+  #cross-subject-rows .dot{ width:9px; height:9px; transform:rotate(45deg); flex-shrink:0; border:1.5px solid currentColor; background:transparent; }
+
+  .ext-node{ cursor:pointer; }
+  .ext-link{ stroke-dasharray: 3,3; stroke-opacity:0.5; }
+  .ext-label{ font-family:'Space Mono',monospace; font-size:8px; fill:var(--dust); pointer-events:none; font-style:italic; }
 </style>
 </head>
 <body>
@@ -232,6 +251,15 @@
   <div id="legend-rows"></div>
 </div>
 
+<div id="cross-panel">
+  <div class="title">
+    <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+      <input type="checkbox" id="cross-toggle"> 跨科連結 Cross-subject
+    </label>
+  </div>
+  <div id="cross-subject-rows"></div>
+</div>
+
 <div id="hint">拖曳空白處可平移畫布<br>滾輪縮放 · 點節點展開詳情</div>
 
 <div id="panel">
@@ -239,7 +267,7 @@
   <div id="panel-content"></div>
 </div>
 
-<script src="./data-embed-v6.js"></script>
+<script src="./data-embed-v8.js"></script>
 <script src="./section-matches-data.js"></script>
 <script>
 const raw = window.__TAXONOMY_DATA__;
@@ -278,25 +306,73 @@ function toggleDomain(dom){
   render();
 }
 
+// ===== Cross-subject external nodes =====
+const externalTopicsRaw = raw.externalTopics || [];
+const crossLinksRaw = raw.crossLinks || [];
+const externalSubjects = [...new Set(externalTopicsRaw.map(n => n.subject_zh))];
+const extColorScale = d3.scaleOrdinal().domain(externalSubjects).range(['#e0a973','#8fc4d6','#e0a3a8','#a8cf9e','#b7a3d6','#7fcbb8','#c9a678']);
+let showCrossLinks = false;
+const activeExternalSubjects = new Set(externalSubjects);
+
+const crossRows = d3.select('#cross-subject-rows');
+externalSubjects.forEach(sub => {
+  const count = crossLinksRaw.filter(l => l.other_subject === sub).length;
+  const row = crossRows.append('div').attr('class','row active').attr('data-subject', sub)
+    .on('click', () => toggleExternalSubject(sub));
+  row.append('div').attr('class','dot').style('color', extColorScale(sub));
+  row.append('div').text(`${sub} (${count})`);
+});
+function toggleExternalSubject(sub){
+  if(activeExternalSubjects.has(sub)) activeExternalSubjects.delete(sub); else activeExternalSubjects.add(sub);
+  d3.select(`#cross-subject-rows .row[data-subject="${sub}"]`).classed('active', activeExternalSubjects.has(sub));
+  render();
+}
+d3.select('#cross-toggle').on('change', function(){
+  showCrossLinks = this.checked;
+  d3.select('#cross-subject-rows').classed('open', showCrossLinks);
+  render();
+});
+
 const width = window.innerWidth, height = window.innerHeight;
 const svg = d3.select('#stage').attr('viewBox', [0,0,width,height]);
 const g = svg.append('g');
 
 svg.call(d3.zoom().scaleExtent([0.15, 6]).on('zoom', (ev) => g.attr('transform', ev.transform)));
 
+const crossLinkSel = g.append('g').attr('class','cross-links');
 const linkSel = g.append('g').attr('class','links');
 const nodeSel = g.append('g').attr('class','nodes');
+const extNodeSel = g.append('g').attr('class','ext-nodes');
 const labelSel = g.append('g').attr('class','labels');
+const extLabelSel = g.append('g').attr('class','ext-labels');
 
 const radiusScale = d3.scaleSqrt().domain(d3.extent(nodes, d => d.centrality || 0.01)).range([3, 13]);
 
+// anchor positions for external-subject clusters, arranged in a ring outside the main graph
+const subjectAnchor = {};
+externalSubjects.forEach((sub, i) => {
+  const angle = (i / externalSubjects.length) * 2 * Math.PI;
+  subjectAnchor[sub] = {
+    x: width/2 + Math.cos(angle) * (Math.min(width,height)/2 - 60),
+    y: height/2 + Math.sin(angle) * (Math.min(height,width)/2 - 60)
+  };
+});
+
+
+const extNodes = externalTopicsRaw.map(n => ({
+  ...n,
+  x: subjectAnchor[n.subject_zh].x + (Math.random()-0.5)*40,
+  y: subjectAnchor[n.subject_zh].y + (Math.random()-0.5)*40
+}));
+const extNodeById = new Map(extNodes.map(n => [n.id, n]));
+
 const simulation = d3.forceSimulation(nodes)
   .force('link', d3.forceLink(links).id(d => d.id).distance(38).strength(0.35))
-  .force('charge', d3.forceManyBody().strength(-42))
+  .force('charge', d3.forceManyBody().strength(d => d.external ? -20 : -42))
   .force('center', d3.forceCenter(width/2, height/2))
-  .force('collide', d3.forceCollide().radius(d => radiusScale(d.centrality||0.01) + 3))
-  .force('x', d3.forceX(width/2).strength(0.02))
-  .force('y', d3.forceY(d => 60 + (d.ageStart||6) * 55).strength(0.15));
+  .force('collide', d3.forceCollide().radius(d => d.external ? 6 : radiusScale(d.centrality||0.01) + 3))
+  .force('x', d3.forceX(d => d.external ? subjectAnchor[d.subject_zh].x : width/2).strength(d => d.external ? 0.12 : 0.02))
+  .force('y', d3.forceY(d => d.external ? subjectAnchor[d.subject_zh].y : 60 + (d.ageStart||6) * 55).strength(d => d.external ? 0.12 : 0.15));
 
 let selectedId = null;
 
@@ -307,9 +383,22 @@ function render(){
   const visibleIds = new Set(visibleNodes.map(n=>n.id));
   const visibleLinks = links.filter(l => visibleIds.has(l.source.id||l.source) && visibleIds.has(l.target.id||l.target));
 
+  const visibleExtNodes = showCrossLinks ? extNodes.filter(n => activeExternalSubjects.has(n.subject_zh)) : [];
+  const visibleExtIds = new Set(visibleExtNodes.map(n=>n.id));
+  const visibleCrossLinks = showCrossLinks ? crossLinksRaw.filter(l =>
+    visibleExtIds.has(l.source) && visibleIds.has(l.target) ||
+    visibleExtIds.has(l.target) && visibleIds.has(l.source)
+  ) : [];
+
   const link = linkSel.selectAll('line').data(visibleLinks, d => (d.source.id||d.source)+'-'+(d.target.id||d.target));
   link.exit().remove();
   link.enter().append('line').attr('class','link-line').merge(link);
+
+  const crossLink = crossLinkSel.selectAll('line').data(visibleCrossLinks, d => d.source+'-'+d.target);
+  crossLink.exit().remove();
+  crossLink.enter().append('line').attr('class','link-line ext-link')
+    .attr('stroke', d => extColorScale(d.other_subject))
+    .merge(crossLink);
 
   const node = nodeSel.selectAll('circle').data(visibleNodes, d => d.id);
   node.exit().remove();
@@ -322,12 +411,29 @@ function render(){
   nodeEnter.append('title').text(d => d.name_zh ? `${d.name_zh} / ${d.name}` : d.name);
   nodeEnter.merge(node);
 
+  const extNode = extNodeSel.selectAll('rect').data(visibleExtNodes, d => d.id);
+  extNode.exit().remove();
+  const extNodeEnter = extNode.enter().append('rect')
+    .attr('class','node-dot ext-node')
+    .attr('width', 10).attr('height', 10)
+    .attr('fill', d => extColorScale(d.subject_zh))
+    .attr('fill-opacity', 0.35)
+    .attr('stroke', d => extColorScale(d.subject_zh))
+    .on('click', (ev,d) => selectExternalNode(d.id))
+    .call(drag(simulation));
+  extNodeEnter.append('title').text(d => `[${d.subject_zh}] ${d.name_zh || d.name}`);
+  extNodeEnter.merge(extNode);
+
   const label = labelSel.selectAll('text').data(visibleNodes.filter(d=>radiusScale(d.centrality||0.01) > 7), d => d.id);
   label.exit().remove();
   label.enter().append('text').attr('class','node-label').text(d=>d.name_zh || d.name).merge(label);
 
-  simulation.nodes(visibleNodes);
-  simulation.force('link').links(visibleLinks);
+  const extLabel = extLabelSel.selectAll('text').data(visibleExtNodes, d => d.id);
+  extLabel.exit().remove();
+  extLabel.enter().append('text').attr('class','ext-label').text(d=>`[${d.subject_zh}] ${d.name_zh||d.name}`).merge(extLabel);
+
+  simulation.nodes([...visibleNodes, ...visibleExtNodes]);
+  simulation.force('link').links([...visibleLinks, ...visibleCrossLinks.map(l=>({...l, id_pair:true}))]);
   simulation.alpha(0.6).restart();
 }
 
@@ -335,10 +441,20 @@ simulation.on('tick', () => {
   linkSel.selectAll('line')
     .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
     .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+  crossLinkSel.selectAll('line')
+    .attr('x1', d => (extNodeById.get(d.source) || nodeById.get(d.source) || {}).x)
+    .attr('y1', d => (extNodeById.get(d.source) || nodeById.get(d.source) || {}).y)
+    .attr('x2', d => (extNodeById.get(d.target) || nodeById.get(d.target) || {}).x)
+    .attr('y2', d => (extNodeById.get(d.target) || nodeById.get(d.target) || {}).y);
   nodeSel.selectAll('circle')
     .attr('cx', d => d.x).attr('cy', d => d.y);
+  extNodeSel.selectAll('rect')
+    .attr('x', d => d.x - 5).attr('y', d => d.y - 5)
+    .attr('transform', d => `rotate(45, ${d.x}, ${d.y})`);
   labelSel.selectAll('text')
     .attr('x', d => d.x + 10).attr('y', d => d.y + 3);
+  extLabelSel.selectAll('text')
+    .attr('x', d => d.x + 9).attr('y', d => d.y + 3);
 });
 
 function drag(sim){
@@ -353,6 +469,8 @@ function selectNode(id){
   const node = nodeById.get(id);
   const prereqs = (inbound.get(id) || []).map(l => ({...l, node: nodeById.get(l.source.id||l.source)}));
   const dependents = (outbound.get(id) || []).map(l => ({...l, node: nodeById.get(l.target.id||l.target)}));
+  const crossLinksForNode = crossLinksRaw.filter(l => l.source === id || l.target === id)
+    .map(l => ({...l, extNode: extNodeById.get(l.source === id ? l.target : l.source)}));
 
   const translated = !!node.name_zh;
   d3.select('#panel-content').html(`
@@ -378,12 +496,34 @@ function selectNode(id){
         <b>${p.node.name_zh || p.node.name}</b>
         <div class="reason">${p.reason_zh || p.reason}</div>
       </div>`).join('') : '<div class="empty-note">沒有後續延伸，這是終端概念</div>'}
+    ${crossLinksForNode.length ? `
+      <h3>跨科關聯 Cross-subject (${crossLinksForNode.length})</h3>
+      ${crossLinksForNode.map(c => `
+        <div class="prereq-item" style="border-left-color:${extColorScale(c.other_subject)}">
+          <span class="conf-badge" style="background:${extColorScale(c.other_subject)}33;color:${extColorScale(c.other_subject)}">${c.other_subject}</span>
+          <b>${c.extNode ? (c.extNode.name_zh || c.extNode.name) : ''}</b>
+          <div class="reason">${c.reason_zh || c.reason}</div>
+        </div>`).join('')}
+      <div class="empty-note">開啟左下角「跨科連結」開關可在地圖上看到這些連線</div>
+    ` : ''}
   `);
 
-  d3.selectAll('.prereq-item').on('click', function(){ selectNode(this.getAttribute('data-id')); });
+  d3.selectAll('.prereq-item[data-id]').on('click', function(){ selectNode(this.getAttribute('data-id')); });
 
   d3.select('#panel').classed('open', true);
   highlightChain(id);
+}
+
+function selectExternalNode(id){
+  const node = extNodeById.get(id);
+  d3.select('#panel-content').html(`
+    <div class="domain-tag hand" style="color:${extColorScale(node.subject_zh)}">${node.subject_zh} · 跨科節點</div>
+    <h2 class="hand">${node.name_zh || node.name}</h2>
+    <div class="meta" style="color:var(--dust)">EN: ${node.name}</div>
+    <div class="desc">${node.description_zh || ''}</div>
+    <div class="empty-note">這是其他科目的節點，與數學科有先備/後續關聯</div>
+  `);
+  d3.select('#panel').classed('open', true);
 }
 
 function closePanel(){
@@ -432,6 +572,7 @@ d3.selectAll('.tab-btn').on('click', function(){
   d3.select('#legend').style('display', tab === 'graph' ? 'block' : 'none');
   d3.select('#search').style('display', tab === 'graph' ? 'block' : 'none');
   d3.select('#hint').style('display', tab === 'graph' ? 'block' : 'none');
+  d3.select('#cross-panel').style('display', tab === 'graph' ? 'block' : 'none');
 });
 
 function renderMatchesTable(){
