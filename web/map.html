@@ -164,6 +164,7 @@
   .node-dot{ cursor:pointer; stroke:var(--bg); stroke-width:1.2; filter:drop-shadow(0 0 4px currentColor); }
   .node-dot.dim{ opacity:0.1; filter:none; }
   .node-dot.hi{ stroke:var(--ink); stroke-width:2; filter:drop-shadow(0 0 10px currentColor); }
+  .node-label.dim{ opacity:0; }
 
   #tabs{ pointer-events:all; margin-top:8px; display:flex; gap:8px; }
   .tab-btn{
@@ -564,6 +565,7 @@ function closePanel(){
 function highlightChain(id){
   if(!id){
     nodeSel.selectAll('circle').classed('dim', false).classed('hi', false);
+    labelSel.selectAll('text').classed('dim', false);
     linkSel.selectAll('line').classed('highlight', false);
     return;
   }
@@ -574,6 +576,8 @@ function highlightChain(id){
   nodeSel.selectAll('circle')
     .classed('dim', d => !related.has(d.id))
     .classed('hi', d => d.id === id);
+  labelSel.selectAll('text')
+    .classed('dim', d => !related.has(d.id));
   linkSel.selectAll('line')
     .classed('highlight', d => {
       const s = d.source.id||d.source, t = d.target.id||d.target;
